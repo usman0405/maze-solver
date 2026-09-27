@@ -1,0 +1,255 @@
+                                                                 Python Program
+import random
+from collections import deque
+
+import matplotlib.pyplot as plt
+import imageio.v2 as imageio
+import numpy as np
+
+
+# Maze generation (DFS-based)
+def create_empty_grid(rows, cols):
+    """Create a grid full of walls (1 = wall, 0 = passage)."""
+    grid = [[1 for _ in range(cols)] for _ in range(rows)]
+    return grid
+def in_bounds(r, c, rows, cols):
+    return 0 <= r < rows and 0 <= c < cols
+def generate_maze(rows=31, cols=31):
+    """
+    Generate a simple perfect maze using recursive backtracking.
+    The grid will have walls (1) and passages (0).
+    """
+    grid = create_empty_grid(rows, cols)
+
+    # Start from a random odd cell inside the grid
+    start_r = random.randrange(1, rows, 2)
+    start_c = random.randrange(1, cols, 2)
+    grid[start_r][start_c] = 0
+
+    stack = [(start_r, start_c)]
+
+    # 4 directions: up, down, left, right (two steps at a time)
+    directions = [(-2, 0), (2, 0), (0, -2), (0, 2)]
+
+    while stack:
+        r, c = stack[-1]
+        # Randomize the order we try directions
+        random.shuffle(directions)
+        carved = False
+
+        for dr, dc in directions:
+            nr, nc = r + dr, c + dc
+            if in_bounds(nr, nc, rows, cols) and grid[nr][nc] == 1:
+                # Carve passage in between
+                grid[r + dr // 2][c + dc // 2] = 0
+                grid[nr][nc] = 0
+                stack.append((nr, nc))
+                carved = True
+                break
+
+        if not carved:
+            stack.pop()
+
+    return grid
+
+
+def add_entrance_and_exit(grid):
+    """
+    Add one entrance on the left border and one exit on the right border.
+    Both openings connect to a passage cell.
+    """
+    rows = len(grid)
+    cols = len(grid[0])
+
+    # Choose an odd row for entrance and exit
+    possible_rows = [r for r in range(1, rows, 2)]
+
+    start_r = random.choice(possible_rows)
+    exit_r = random.choice(possible_rows)
+
+    # Entrance on the left border (column 0)
+    grid[start_r][0] = 0
+    # Connect entrance to inside cell
+    grid[start_r][1] = 0
+
+    # Exit on the right border (column cols-1)
+    grid[exit_r][cols - 1] = 0
+    # Connect exit to inside cell
+    grid[exit_r][cols - 2] = 0
+
+    start = (start_r, 0)
+    goal = (exit_r, cols - 1)
+
+    return start, goal
+
+# BFS search
+def bfs_search(grid, start, goal):
+    """
+    Standard BFS on the grid using a queue.
+    Stops as soon as the goal is reached.
+    Returns:
+        visited_order: list of cells in the order they were visited
+        parent: dict mapping cell -> parent cell
+        found: True if goal reached, False otherwise
+    """
+    rows = len(grid)
+    cols = len(grid[0])
+
+    queue = deque()
+    queue.append(start)
+
+    visited = set()
+    visited.add(start)
+
+    parent = {start: None}
+    visited_order = []
+
+    # 4-connected grid movement
+    directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+
+    while queue:
+        current = queue.popleft()
+        visited_order.append(current)
+
+        if current == goal:
+            # Stop as soon as we reach the exit
+            return visited_order, parent, True
+
+        r, c = current
+        for dr, dc in directions:
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < rows and 0 <= nc < cols:
+                # 0 = free cell; 1 = wall
+                if grid[nr][nc] == 0 and (nr, nc) not in visited:
+                    visited.add((nr, nc))
+                    parent[(nr, nc)] = current
+                    queue.append((nr, nc))
+
+    # If we exit the loop, we did not find the goal
+    return visited_order, parent, False
+
+
+def reconstruct_path(parent, start, goal):
+    """Reconstruct path from start to goal using the parent dictionary."""
+    path = []
+    current = goal
+    while current is not None:
+        path.append(current)
+        current = parent.get(current)
+    path.reverse()
+    # If the first node is not the start, then no valid path
+    if not path or path[0] != start:
+        return []
+    return path
+
+# Visualisation and GIF creation
+def draw_frame(grid, start, goal, visited_set, path_set=None):
+    """
+    Draw the maze as an image using matplotlib and return it as a numpy array.
+    - Walls: black
+    - Free cells: white
+    - Visited cells: light gray
+    - Path cells: red
+    - Start: blue
+    - Goal: green
+    """
+    rows = len(grid)
+    cols = len(grid[0])
+
+    # Base image: white for passage, black for wall
+    img = np.zeros((rows, cols, 3), dtype=np.uint8)
+    for r in range(rows):
+        for c in range(cols):
+            if grid[r][c] == 1:
+                img[r, c] = [0, 0, 0]      # wall = black
+            else:
+                img[r, c] = [255, 255, 255]  # passage = white
+
+    # Shade visited cells
+    for (r, c) in visited_set:
+        img[r, c] = [200, 200, 200]  # light gray
+
+    # Draw path cells
+    if path_set is not None:
+        for (r, c) in path_set:
+            img[r, c] = [255, 0, 0]  # red
+
+    # Start (blue) and goal (green)
+    sr, sc = start
+    gr, gc = goal
+    img[sr, sc] = [0, 0, 255]    # blue
+    img[gr, gc] = [0, 255, 0]    # green
+
+    # Use matplotlib just to convert array to an image
+    fig, ax = plt.subplots(figsize=(4, 4))
+    ax.set_axis_off()
+    ax.imshow(img)
+    fig.tight_layout(pad=0)
+
+    # Draw to a numpy array
+    fig.canvas.draw()
+    frame = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+    frame = frame.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+
+    plt.close(fig)
+    return frame
+
+
+def create_bfs_animation(grid, start, goal, visited_order, path, filename="maze_bfs.gif"):
+    """
+    Build an animated GIF showing BFS exploration and the final path.
+    """
+    frames = []
+    visited_set = set()
+
+    # 1) Frames for BFS exploration
+    for idx, cell in enumerate(visited_order):
+        visited_set.add(cell)
+
+        # To reduce file size, you can skip some frames:
+        if idx % 2 == 0:
+            frame = draw_frame(grid, start, goal, visited_set)
+            frames.append(frame)
+
+    # 2) Frames for drawing the final path
+    path_set = set()
+    for cell in path:
+        path_set.add(cell)
+        frame = draw_frame(grid, start, goal, visited_set, path_set)
+        frames.append(frame)
+
+    # Save as animated GIF
+    imageio.mimsave(filename, frames, duration=0.05)
+    print(f"Animated GIF saved as {filename}")
+
+
+# Main program
+def main():
+    # Maze size between 30x30 and 40x40
+    rows, cols = 31, 31
+
+    # 1. Generate maze
+    grid = generate_maze(rows, cols)
+
+    # 2. Add single entrance and exit
+    start, goal = add_entrance_and_exit(grid)
+
+    print("Maze size:", rows, "x", cols)
+    print("Start:", start)
+    print("Goal:", goal)
+
+    # 3. Run BFS from start to goal
+    visited_order, parent, found = bfs_search(grid, start, goal)
+
+    if not found:
+        print("No path found from start to goal.")
+        return
+
+    # 4. Reconstruct shortest path
+    path = reconstruct_path(parent, start, goal)
+    print("Path length:", len(path))
+
+    # 5. Create animated GIF
+    create_bfs_animation(grid, start, goal, visited_order, path, filename="maze_bfs.gif")
+if __name__ == "__main__":
+    main()
